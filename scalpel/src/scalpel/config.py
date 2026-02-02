@@ -26,15 +26,25 @@ class Settings(BaseSettings):
     
     # Paths
     papers_dir: Path = Path("data/papers")
+    lancedb_path: Path = Path("data/lancedb")
     
     # Analysis Settings
     chunk_size: int = 2000  # Tokens per chunk for processing
     chunk_overlap: int = 200  # Overlap between chunks
     
+    # Embedding Configuration
+    embedding_model: str = "nomic-embed-text"  # Ollama embedding model
+    embedding_dimensions: int = 768  # nomic-embed-text output dimensions
+    embedding_batch_size: int = 32  # Batch size for embedding generation
+    
+    # LanceDB Settings
+    lancedb_table: str = "scalpel_papers"
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Ensure papers directory exists
+        # Ensure data directories exist
         self.papers_dir.mkdir(parents=True, exist_ok=True)
+        self.lancedb_path.mkdir(parents=True, exist_ok=True)
 
 
 # Global settings instance

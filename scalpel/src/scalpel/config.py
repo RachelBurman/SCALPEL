@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # Ollama Configuration
     ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5"
+    ollama_model: str = "qwen2.5:0.5b"
     
     # Model Parameters
     model_temperature: float = 0.3  # Lower for more analytical responses

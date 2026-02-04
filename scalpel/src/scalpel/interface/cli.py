@@ -394,6 +394,28 @@ def critique(
 
 
 # =============================================================================
+# GUI COMMAND
+# =============================================================================
+
+@app.command()
+def gui():
+    """
+    Launch the SCALPEL terminal user interface.
+    
+    Opens a Textual-based TUI in your terminal.
+    Requires: pip install scalpel[gui]
+    """
+    try:
+        from scalpel.interface.gui_textual import main as run_gui
+    except ImportError:
+        console.print("[red]✗ Textual not installed![/red]")
+        console.print("[dim]Install with: pip install scalpel[gui][/dim]")
+        raise typer.Exit(1)
+    
+    run_gui()
+
+
+# =============================================================================
 # INFO COMMANDS
 # =============================================================================
 

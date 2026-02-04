@@ -205,8 +205,11 @@ class LLMClient:
     def is_available(self) -> bool:
         """Check if the Ollama server and model are available."""
         try:
-            models = self._client.list()
-            model_names = [m["name"].split(":")[0] for m in models.get("models", [])]
+            response = self._client.list()
+            if hasattr(response, "models"):
+                model_names = [m.model.split(":")[0] for m in response.models]
+            else:
+                model_names = [m["name"].split(":")[0] for m in response.get("models", [])]
             return self.model.split(":")[0] in model_names
         except Exception:
             return False

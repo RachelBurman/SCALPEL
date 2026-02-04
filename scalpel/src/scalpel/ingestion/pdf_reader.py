@@ -9,9 +9,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import pymupdf
-from rich.console import Console
 
-console = Console()
+from scalpel.console import console
 
 
 # Common section headers in academic papers

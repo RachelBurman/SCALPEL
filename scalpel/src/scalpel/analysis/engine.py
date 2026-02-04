@@ -8,16 +8,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 from rich.markdown import Markdown
 
 from scalpel.analysis.llm_client import LLMClient, get_client
 from scalpel.analysis.prompts import get_template, AnalysisType
+from scalpel.console import console
 from scalpel.ingestion import ExtractedPaper, TextChunk, chunk_paper, chunk_for_analysis
-
-console = Console()
 
 
 @dataclass

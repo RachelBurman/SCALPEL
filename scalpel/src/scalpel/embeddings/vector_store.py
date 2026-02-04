@@ -10,13 +10,11 @@ from pathlib import Path
 import lancedb
 import ollama
 import pyarrow as pa
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from scalpel.config import settings
+from scalpel.console import console
 from scalpel.ingestion import ExtractedPaper, TextChunk, chunk_paper, extract_pdf
-
-console = Console()
 
 
 @dataclass

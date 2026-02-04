@@ -9,13 +9,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 import ollama
-from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 
 from scalpel.config import settings
-
-console = Console()
+from scalpel.console import console
 
 
 @dataclass

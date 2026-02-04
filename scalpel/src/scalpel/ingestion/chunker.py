@@ -10,12 +10,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 import tiktoken
-from rich.console import Console
 
 from scalpel.config import settings
+from scalpel.console import console
 from scalpel.ingestion.pdf_reader import ExtractedPaper
-
-console = Console()
 
 # Use cl100k_base encoding (GPT-4, ChatGPT models) as reasonable default
 # Works well for most modern LLMs including Qwen

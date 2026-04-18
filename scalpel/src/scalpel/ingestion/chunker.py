@@ -6,7 +6,9 @@ Splits on paragraphs and sentences, never mid-word or mid-abbreviation.
 """
 
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import tiktoken
@@ -16,8 +18,19 @@ from scalpel.console import console
 from scalpel.ingestion.pdf_reader import ExtractedPaper
 
 # Use cl100k_base encoding (GPT-4, ChatGPT models) as reasonable default
-# Works well for most modern LLMs including Qwen
 ENCODER = tiktoken.get_encoding("cl100k_base")
+
+# Try to load the C++ extension for fast string operations.
+# Falls back to pure Python if the extension hasn't been built yet.
+try:
+    _cpp_dir = Path(__file__).parent.parent / "cpp"
+    if str(_cpp_dir) not in sys.path:
+        sys.path.insert(0, str(_cpp_dir))
+    import _scalpel_chunker as _cpp
+    _CPP_AVAILABLE = True
+except ImportError:
+    _cpp = None
+    _CPP_AVAILABLE = False
 
 # Common abbreviations that shouldn't trigger sentence splits
 ABBREVIATIONS = [
@@ -81,18 +94,12 @@ def _restore_abbreviations(text: str) -> str:
 
 
 def split_into_sentences(text: str) -> list[str]:
-    """
-    Split text into sentences, respecting abbreviations.
-    
-    Handles common academic writing patterns without splitting on
-    "et al.", "Fig.", "Eq.", etc.
-    """
+    """Split text into sentences, respecting abbreviations."""
+    if _CPP_AVAILABLE:
+        return _cpp.split_sentences(text, ABBREVIATIONS)
+
     protected = _protect_abbreviations(text)
-    
-    # Split on sentence boundaries (. ! ?) followed by space and capital
     sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', protected)
-    
-    # Restore and clean
     sentences = [_restore_abbreviations(s).strip() for s in sentences]
     return [s for s in sentences if s]
 
@@ -104,50 +111,31 @@ def split_into_paragraphs(text: str) -> list[str]:
 
 
 def _find_semantic_break(text: str, target_pos: int, window: int = 200) -> int:
-    """
-    Find the best semantic break point near target_pos.
-    
-    Looks for (in order of preference):
-    1. Paragraph break
-    2. Sentence break
-    3. Word break
-    
-    Args:
-        text: The text to search in
-        target_pos: Ideal character position to break at
-        window: How far to search before/after target
-        
-    Returns:
-        Character position of best break point
-    """
+    """Find the best semantic break point near target_pos."""
+    if _CPP_AVAILABLE:
+        return _cpp.find_semantic_break(text, target_pos, window)
+
     start = max(0, target_pos - window)
-    end = min(len(text), target_pos + window)
-    search_region = text[start:end]
-    
-    # Look for paragraph break (double newline)
+    search_region = text[start:min(len(text), target_pos + window)]
+
     para_break = search_region.rfind("\n\n", 0, window + (target_pos - start))
     if para_break > window // 2:
         return start + para_break + 2
-    
-    # Look for sentence break
+
     protected = _protect_abbreviations(search_region)
-    
-    # Find sentence endings in the region before target
     best_sentence_break = -1
     for match in re.finditer(r'[.!?]\s+', protected[:window + (target_pos - start)]):
         pos = match.end()
         if pos > best_sentence_break:
             best_sentence_break = pos
-    
+
     if best_sentence_break > window // 2:
         return start + best_sentence_break
-    
-    # Fall back to word break
+
     word_break = search_region.rfind(" ", 0, window + (target_pos - start))
     if word_break > 0:
         return start + word_break + 1
-    
-    # Last resort: just use target
+
     return target_pos
 
 

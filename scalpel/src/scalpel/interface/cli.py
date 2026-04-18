@@ -455,6 +455,36 @@ def eval(
 
 
 # =============================================================================
+# STREAMLIT UI COMMAND
+# =============================================================================
+
+@app.command()
+def ui():
+    """
+    Launch the SCALPEL Streamlit web interface.
+
+    Opens a browser with the full UI: query, chunk viewer, evaluation scores,
+    and RL training history charts.
+    Requires: pip install scalpel[ui]
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    app_path = Path(__file__).parent / "app.py"
+
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "streamlit", "run", str(app_path)],
+            check=True,
+        )
+    except FileNotFoundError:
+        console.print("[red]✗ Streamlit not installed.[/red]")
+        console.print("[dim]Install with: pip install scalpel[ui][/dim]")
+        raise typer.Exit(1)
+
+
+# =============================================================================
 # GUI COMMAND
 # =============================================================================
 

@@ -38,5 +38,10 @@ data/papers/*.txt
 .DS_Store
 Thumbs.db
 
-# Vector DB (will add later)
+# Vector DB
 *.chromadb/
+data/lancedb/
+
+# RL checkpoints and cache (large binary files)
+models/rl/*.pt
+models/rl/step_cache.json

@@ -394,6 +394,67 @@ def critique(
 
 
 # =============================================================================
+# EVAL COMMAND
+# =============================================================================
+
+@app.command()
+def eval(
+    query: str = typer.Argument(
+        ...,
+        help="Question to ask against the indexed papers.",
+    ),
+    n: int = typer.Option(
+        5,
+        "--results", "-n",
+        help="Number of chunks to retrieve.",
+    ),
+):
+    """
+    Ask a question, generate a RAG response, then score it.
+
+    Retrieves relevant chunks, generates an answer, and runs the LLM judge
+    to score groundedness, relevance, and confidence calibration.
+    """
+    from scalpel.embeddings import search as do_search
+    from scalpel.analysis.llm_client import get_client
+    from scalpel.analysis.prompts import get_template
+    from scalpel.evaluation import evaluate as eval_response
+
+    # Retrieve chunks
+    console.print(f"\n[dim]Searching for relevant context...[/dim]")
+    results = do_search(query, n_results=n)
+
+    if not results:
+        console.print("[yellow]No indexed papers found. Run [cyan]scalpel add[/cyan] first.[/yellow]")
+        raise typer.Exit(1)
+
+    chunk_texts = [r.text for r in results]
+    chunks_display = "\n\n---\n\n".join(
+        f"[{r.paper_title}]\n{r.text}" for r in results
+    )
+
+    # Generate RAG response
+    console.print("[dim]Generating response...[/dim]")
+    client = get_client()
+    template = get_template("rag_query")
+    system_prompt, user_prompt = template.format(question=query, context=chunks_display)
+    llm_response = client.generate(prompt=user_prompt, system=system_prompt)
+
+    console.print(Panel(
+        Markdown(llm_response.content),
+        title=f"[bold]Response[/bold]",
+        subtitle=f"[dim]{len(results)} chunks retrieved[/dim]",
+        border_style="cyan",
+    ))
+
+    # Evaluate
+    console.print()
+    score = eval_response(query, chunk_texts, llm_response.content)
+    score.display()
+    console.print()
+
+
+# =============================================================================
 # GUI COMMAND
 # =============================================================================
 
@@ -416,6 +477,280 @@ def gui():
 
 
 # =============================================================================
+# RL TRAINING COMMAND
+# =============================================================================
+
+@app.command("train-rl")
+def train_rl(
+    iterations: int = typer.Option(10, "--iterations", "-i", help="Number of collect→update cycles."),
+    rollouts: int = typer.Option(20, "--rollouts", "-n", help="Rollouts collected per iteration."),
+    queries_file: Optional[Path] = typer.Option(
+        None, "--queries", "-q",
+        help="Text file with one query per line. Uses built-in defaults if omitted.",
+        exists=True, readable=True,
+    ),
+    save_dir: Path = typer.Option(Path("models/rl"), "--save-dir", help="Checkpoint directory."),
+    resume: bool = typer.Option(False, "--resume", "-r", help="Resume from latest checkpoint."),
+):
+    """
+    Train the PPO retrieval optimisation agent.
+
+    Collects rollouts through the RAG pipeline, scores them with the LLM
+    judge, and trains a policy to pick better retrieval parameters.
+    Requires papers to be indexed (run scalpel add / add-arxiv first).
+    """
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        console.print("[red]✗ PyTorch not installed.[/red]")
+        console.print("[dim]Install with: pip install torch[/dim]")
+        raise typer.Exit(1)
+
+    from scalpel.rl.train import train, DEFAULT_QUERIES
+
+    queries = None
+    if queries_file:
+        queries = [
+            line.strip()
+            for line in queries_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        console.print(f"\n[dim]Loaded {len(queries)} queries from {queries_file}[/dim]")
+    else:
+        queries = DEFAULT_QUERIES
+        console.print(f"\n[dim]Using {len(queries)} built-in queries[/dim]")
+
+    try:
+        train(
+            queries=queries,
+            n_iterations=iterations,
+            n_rollouts_per_iter=rollouts,
+            save_dir=save_dir,
+            resume=resume,
+        )
+    except Exception as e:
+        console.print(f"\n[red]✗ Training failed:[/red] {e}")
+        raise typer.Exit(1)
+
+
+# =============================================================================
+# SETUP COMMAND
+# =============================================================================
+
+OPENROUTER_FREE_MODELS_FALLBACK = [
+    "google/gemma-2-9b-it:free",
+    "microsoft/phi-3-mini-128k-instruct:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "other (enter manually)",
+]
+
+
+def _fetch_free_models(api_key: str) -> list[str]:
+    """Fetch currently available free models from OpenRouter."""
+    try:
+        import httpx
+        with httpx.Client(timeout=10, follow_redirects=True) as client:
+            r = client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            r.raise_for_status()
+            models = r.json().get("data", [])
+            free = sorted(
+                m["id"] for m in models
+                if m["id"].endswith(":free")
+            )
+            return free + ["other (enter manually)"] if free else OPENROUTER_FREE_MODELS_FALLBACK
+    except Exception:
+        return OPENROUTER_FREE_MODELS_FALLBACK
+
+OLLAMA_SUGGESTED_MODELS = [
+    "qwen2.5:0.5b",
+    "qwen2.5:1.5b",
+    "llama3.2:1b",
+    "llama3.2:3b",
+    "phi3.5:mini",
+    "gemma2:2b",
+    "other (enter manually)",
+]
+
+
+@app.command()
+def setup():
+    """
+    Interactive setup wizard.
+
+    Configures your LLM provider and writes a .env file.
+    Run this first if you're new to SCALPEL.
+    """
+    console.print(Panel(
+        "[bold]Welcome to SCALPEL setup![/bold]\n\n"
+        "This wizard will configure your LLM provider.\n"
+        "Settings are saved to [cyan].env[/cyan] in your current directory.",
+        title="[bold cyan]🔪 SCALPEL Setup[/bold cyan]",
+        border_style="cyan",
+    ))
+    console.print()
+
+    # Choose provider
+    console.print("[bold]LLM Provider[/bold]")
+    console.print("  [cyan]1[/cyan] - Ollama (local, private, free — needs Ollama installed)")
+    console.print("  [cyan]2[/cyan] - OpenRouter (cloud, free tier available — needs API key)")
+    console.print()
+
+    provider_choice = typer.prompt("Choose provider", default="1")
+    while provider_choice not in ("1", "2"):
+        provider_choice = typer.prompt("Please enter 1 or 2", default="1")
+
+    env_lines: list[str] = []
+
+    if provider_choice == "1":
+        provider = "ollama"
+        env_lines.append("LLM_PROVIDER=ollama")
+
+        console.print("\n[bold]Ollama model[/bold]")
+        for i, m in enumerate(OLLAMA_SUGGESTED_MODELS, 1):
+            console.print(f"  [cyan]{i}[/cyan] - {m}")
+        console.print()
+
+        model_choice = typer.prompt("Choose model number", default="1")
+        try:
+            idx = int(model_choice) - 1
+            if 0 <= idx < len(OLLAMA_SUGGESTED_MODELS) - 1:
+                model = OLLAMA_SUGGESTED_MODELS[idx]
+            else:
+                model = typer.prompt("Enter model name")
+        except ValueError:
+            model = typer.prompt("Enter model name")
+
+        env_lines.append(f"OLLAMA_MODEL={model}")
+
+        ollama_host = typer.prompt("Ollama host", default="http://localhost:11434")
+        if ollama_host != "http://localhost:11434":
+            env_lines.append(f"OLLAMA_HOST={ollama_host}")
+
+        console.print(f"\n[dim]After setup, pull the model with:[/dim]")
+        console.print(f"[cyan]  ollama pull {model}[/cyan]")
+        console.print(f"[cyan]  ollama pull nomic-embed-text[/cyan]  [dim](for search)[/dim]")
+
+    else:
+        provider = "openrouter"
+        env_lines.append("LLM_PROVIDER=openrouter")
+
+        console.print()
+        console.print(
+            "[dim]Get a free API key at [link=https://openrouter.ai]openrouter.ai[/link][/dim]\n"
+        )
+        api_key = typer.prompt("OpenRouter API key", hide_input=True)
+        env_lines.append(f"OPENROUTER_API_KEY={api_key}")
+
+        console.print("\n[dim]Fetching available free models...[/dim]")
+        free_models = _fetch_free_models(api_key)
+        console.print("\n[bold]Free models[/bold]")
+        for i, m in enumerate(free_models, 1):
+            console.print(f"  [cyan]{i}[/cyan] - {m}")
+        console.print()
+
+        model_choice = typer.prompt("Choose model number", default="1")
+        try:
+            idx = int(model_choice) - 1
+            if 0 <= idx < len(free_models) - 1:
+                model = free_models[idx]
+            else:
+                model = typer.prompt("Enter model name (e.g. google/gemma-2-9b-it:free)")
+        except ValueError:
+            model = typer.prompt("Enter model name")
+
+        env_lines.append(f"OPENROUTER_MODEL={model}")
+
+        console.print(
+            "\n[dim]Note: search/embeddings still use Ollama (nomic-embed-text).\n"
+            "Install Ollama and run [cyan]ollama pull nomic-embed-text[/cyan] to enable search.[/dim]"
+        )
+
+    # Write .env
+    env_path = Path(".env")
+    existing: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                existing[k.strip()] = v.strip()
+
+    for line in env_lines:
+        k, _, v = line.partition("=")
+        existing[k.strip()] = v.strip()
+
+    env_content = "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n"
+    env_path.write_text(env_content, encoding="utf-8")
+
+    console.print(f"\n[green]✓[/green] Saved config to [cyan].env[/cyan]")
+    console.print(f"[green]✓[/green] Provider: [bold]{provider}[/bold]  Model: [bold]{model}[/bold]")
+    console.print("\n[dim]Run [cyan]scalpel config[/cyan] to verify, or [cyan]scalpel --help[/cyan] to get started.[/dim]\n")
+
+
+# =============================================================================
+# MODEL COMMAND
+# =============================================================================
+
+@app.command()
+def model():
+    """
+    Switch the active LLM model.
+
+    Fetches live free models from OpenRouter (if configured) and lets you
+    pick a new one, then saves it to .env.
+    """
+    from scalpel.config import settings
+
+    if settings.llm_provider != "openrouter":
+        console.print("[yellow]Active provider is Ollama, not OpenRouter.[/yellow]")
+        console.print("[dim]Run [cyan]scalpel setup[/cyan] to switch providers or change the Ollama model.[/dim]")
+        raise typer.Exit()
+
+    if not settings.openrouter_api_key:
+        console.print("[red]✗ OPENROUTER_API_KEY not set.[/red]")
+        console.print("[dim]Run [cyan]scalpel setup[/cyan] first.[/dim]")
+        raise typer.Exit(1)
+
+    console.print("\n[dim]Fetching available free models...[/dim]")
+    free_models = _fetch_free_models(settings.openrouter_api_key)
+
+    console.print(f"\n[bold]Free models[/bold]  (current: [cyan]{settings.openrouter_model}[/cyan])\n")
+    for i, m in enumerate(free_models, 1):
+        marker = "  [green]←[/green]" if m == settings.openrouter_model else ""
+        console.print(f"  [cyan]{i}[/cyan] - {m}{marker}")
+    console.print()
+
+    model_choice = typer.prompt("Choose model number")
+    try:
+        idx = int(model_choice) - 1
+        if 0 <= idx < len(free_models) - 1:
+            new_model = free_models[idx]
+        else:
+            new_model = typer.prompt("Enter model name (e.g. google/gemma-3-27b-it:free)")
+    except ValueError:
+        new_model = typer.prompt("Enter model name")
+
+    # Update .env
+    env_path = Path(".env")
+    existing: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                existing[k.strip()] = v.strip()
+
+    existing["OPENROUTER_MODEL"] = new_model
+    env_path.write_text(
+        "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",
+        encoding="utf-8",
+    )
+
+    console.print(f"\n[green]✓[/green] Model set to [bold]{new_model}[/bold]\n")
+
+
+# =============================================================================
 # INFO COMMANDS
 # =============================================================================
 
@@ -435,7 +770,7 @@ def stats():
 [bold]Total chunks:[/bold] {info['total_chunks']}
 
 [bold]Embedding model:[/bold] {info['embedding_model']}
-[bold]LLM model:[/bold] {settings.ollama_model}
+[bold]LLM model:[/bold] {settings.active_model} ({settings.llm_provider})
 [bold]Database:[/bold] {info['db_path']}""",
         title="[bold cyan]🔪 SCALPEL Stats[/bold cyan]",
         border_style="cyan",
@@ -449,12 +784,22 @@ def config():
     """
     from scalpel.config import settings
     
+    if settings.llm_provider == "openrouter":
+        provider_line = f"[bold]Provider:[/bold] [green]OpenRouter[/green] (cloud)"
+        model_line = f"[bold]LLM Model:[/bold] {settings.openrouter_model}"
+        key_status = "[green]set[/green]" if settings.openrouter_api_key else "[red]missing![/red]"
+        extra = f"[bold]API Key:[/bold] {key_status}"
+    else:
+        provider_line = f"[bold]Provider:[/bold] [cyan]Ollama[/cyan] (local)"
+        model_line = f"[bold]LLM Model:[/bold] {settings.ollama_model}"
+        extra = f"[bold]Ollama Host:[/bold] {settings.ollama_host}"
+
     console.print(Panel(
-        f"""[bold]Ollama Host:[/bold] {settings.ollama_host}
-[bold]LLM Model:[/bold] {settings.ollama_model}
-[bold]Embedding Model:[/bold] {settings.embedding_model}
+        f"""{provider_line}
+{model_line}
+{extra}
+[bold]Embedding Model:[/bold] {settings.embedding_model} (Ollama)
 [bold]Temperature:[/bold] {settings.model_temperature}
-[bold]Context Length:[/bold] {settings.model_context_length:,}
 
 [bold]Chunk Size:[/bold] {settings.chunk_size} tokens
 [bold]Chunk Overlap:[/bold] {settings.chunk_overlap} tokens

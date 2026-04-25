@@ -237,7 +237,7 @@ class InvestmentReport:
         if self.claims:
             lines += ["", "## Claim-by-Claim Analysis", "| Claim | BS Score | Reasoning |", "| --- | --- | --- |"]
             for c in self.claims:
-                lines.append(f"| {c.text[:80]} | {c.bs_score:.0f}/10 | {c.reasoning[:80]} |")
+                lines.append(f"| {c.text} | {c.bs_score:.0f}/10 | {c.reasoning} |")
         lines += ["", "## Summary", self.summary or "No summary generated."]
         if self.model_used:
             lines += ["", "---", f"*Model: {self.model_used}*"]
@@ -308,7 +308,7 @@ class BSScoreResult:
         if self.claims:
             lines += ["", "## Claims", "| Claim | BS Score | Reasoning |", "| --- | --- | --- |"]
             for c in self.claims:
-                lines.append(f"| {c.text[:80]} | {c.bs_score:.0f}/10 | {c.reasoning[:80]} |")
+                lines.append(f"| {c.text} | {c.bs_score:.0f}/10 | {c.reasoning} |")
         return "\n".join(lines)
 
 

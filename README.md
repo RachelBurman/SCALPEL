@@ -98,13 +98,13 @@ scalpel bear add AAPL
 scalpel bear add TSLA
 
 # Full investment report: bull case, bear case, key assumptions, per-claim BS scores
-scalpel bear analyse NVDA
+scalpel bear analyse AAPL
 
 # Bullshit score only — how credible are the company's claims?
 scalpel bear bs TSLA
 
 # Cross-reference company claims against your scientific paper library
-scalpel bear cross MRNA
+scalpel bear cross AAPL
 
 # Compare two companies head-to-head
 scalpel bear compare AAPL MSFT
@@ -113,6 +113,40 @@ scalpel bear compare AAPL MSFT
 scalpel bear list
 scalpel bear remove TSLA
 ```
+
+### Reports
+
+Every analysis command auto-saves a markdown report to `data/reports/` with a timestamped filename:
+
+```
+data/reports/
+├── bear_analyse_AAPL_2026-04-25_21-25.md
+├── bear_cross_AAPL_2026-04-25_21-51.md
+├── bear_compare_AAPL_vs_MSFT_2026-04-25_22-13.md
+└── ...
+```
+
+You can also specify a custom path with `--output`:
+
+```bash
+scalpel bear analyse AAPL --output reports/my_report.md
+scalpel bear cross AAPL --output reports/aapl_cross.md
+scalpel critique paper.pdf --output reports/critique.md
+```
+
+### Example Reports
+
+The following reports were generated as part of initial testing against the paper library:
+
+| Report | Command |
+|--------|---------|
+| [AAPL Investment Report](scalpel/data/reports/bear_analyse_AAPL_2026-04-25_21-25.md) | `scalpel bear analyse AAPL` |
+| [MSFT Investment Report](scalpel/data/reports/bear_analyse_MSFT_2026-04-25_21-36.md) | `scalpel bear analyse MSFT` |
+| [AAPL Cross-Reference](scalpel/data/reports/bear_cross_AAPL_2026-04-25_21-51.md) | `scalpel bear cross AAPL` |
+| [MSFT Cross-Reference](scalpel/data/reports/bear_cross_MSFT_2026-04-25_22-04.md) | `scalpel bear cross MSFT` |
+| [AAPL vs MSFT Comparison](scalpel/data/reports/bear_compare_AAPL_vs_MSFT_2026-04-25_22-13.md) | `scalpel bear compare AAPL MSFT` |
+
+Cross-references were run against a library of 10 papers covering stock price prediction, LLM-based sentiment analysis, earnings announcement modelling, tech sector financial metrics, product diversification and firm value, and AI capability valuation.
 
 ### Web UI
 
@@ -141,6 +175,7 @@ scalpel/
 │   └── interface/       # CLI (Typer + Rich) + Streamlit web UI
 ├── data/papers/         # Your paper library (gitignored)
 ├── data/lancedb/        # Vector database (gitignored)
+├── data/reports/        # Generated markdown reports (gitignored)
 └── pyproject.toml
 ```
 

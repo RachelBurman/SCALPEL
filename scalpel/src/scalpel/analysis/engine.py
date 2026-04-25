@@ -36,7 +36,18 @@ class AnalysisResult:
             title=f"[bold]{self.analysis_type}[/bold] — {self.paper_title}",
             border_style="cyan",
         ))
-    
+
+    def to_markdown(self) -> str:
+        """Return the result as a markdown string."""
+        lines = [
+            f"# {self.analysis_type} — {self.paper_title}",
+            "",
+            self.content,
+        ]
+        if self.model_used:
+            lines += ["", f"---", f"*Model: {self.model_used}*"]
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         return f"AnalysisResult({self.analysis_type}, {len(self.content)} chars)"
 
@@ -84,7 +95,29 @@ class BullshitScore:
             title="[bold]🔪 Bullshit Score[/bold]",
             border_style=color,
         ))
-    
+
+    def to_markdown(self) -> str:
+        """Return the bullshit score as a markdown string."""
+        lines = [
+            "# 🔪 Bullshit Score",
+            "",
+            f"**Score: {self.overall_score}/10 — {self.rating}**",
+            "",
+            self.summary,
+        ]
+        if self.methodology_score is not None:
+            lines += [
+                "",
+                "## Breakdown",
+                f"- Methodology: {self.methodology_score}/10",
+                f"- Statistics: {self.statistics_score}/10",
+                f"- Claims: {self.claims_score}/10",
+                f"- Transparency: {self.transparency_score}/10",
+            ]
+        if self.red_flags:
+            lines += ["", "## Red Flags", *[f"- {f}" for f in self.red_flags]]
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         return f"BullshitScore({self.overall_score}/10 - {self.rating})"
 

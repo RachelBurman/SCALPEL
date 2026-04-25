@@ -217,6 +217,30 @@ class InvestmentReport:
             border_style="dim",
         ))
 
+    def to_markdown(self) -> str:
+        """Return the investment report as a markdown string."""
+        lines = [
+            f"# BEAR Investment Report — {self.company_name} ({self.ticker})",
+            "",
+            f"**Overall BS Score: {self.overall_bs_score:.1f}/10 — {self.bs_rating}**",
+            "",
+            "## Bull Case",
+            *[f"- {p}" for p in self.bull_case] or ["- No bull case identified."],
+            "",
+            "## Bear Case",
+            *[f"- {p}" for p in self.bear_case] or ["- No bear case identified."],
+        ]
+        if self.key_assumptions:
+            lines += ["", "## Key Assumptions", *[f"- {a}" for a in self.key_assumptions]]
+        if self.claims:
+            lines += ["", "## Claim-by-Claim Analysis", "| Claim | BS Score | Reasoning |", "| --- | --- | --- |"]
+            for c in self.claims:
+                lines.append(f"| {c.text[:80]} | {c.bs_score:.0f}/10 | {c.reasoning[:80]} |")
+        lines += ["", "## Summary", self.summary or "No summary generated."]
+        if self.model_used:
+            lines += ["", "---", f"*Model: {self.model_used}*"]
+        return "\n".join(lines)
+
 
 @dataclass
 class BSScoreResult:
@@ -269,6 +293,21 @@ class BSScoreResult:
             title=f"[bold]BS Score — {self.company_name} ({self.ticker})[/bold]",
             border_style=color,
         ))
+
+    def to_markdown(self) -> str:
+        """Return the BS score result as a markdown string."""
+        lines = [
+            f"# BS Score — {self.company_name} ({self.ticker})",
+            "",
+            f"**{self.overall_score:.1f}/10 — {self.rating}**",
+            "",
+            self.summary or "",
+        ]
+        if self.claims:
+            lines += ["", "## Claims", "| Claim | BS Score | Reasoning |", "| --- | --- | --- |"]
+            for c in self.claims:
+                lines.append(f"| {c.text[:80]} | {c.bs_score:.0f}/10 | {c.reasoning[:80]} |")
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

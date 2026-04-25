@@ -100,6 +100,24 @@ class EvaluationScore:
                 border_style="dim",
             ))
 
+    def to_markdown(self) -> str:
+        """Return the evaluation score as a markdown string."""
+        lines = [
+            "## 🔬 RAG Evaluation",
+            "",
+            f"| Metric | Score |",
+            "| --- | --- |",
+            f"| Groundedness | {self.groundedness:.1f}/10 |",
+            f"| Relevance | {self.relevance:.1f}/10 |",
+            f"| Confidence Calibration | {self.confidence_calibration:.1f}/10 |",
+            f"| **Overall** | **{self.overall}/10 — {self.grade}** |",
+        ]
+        if self.unsupported_claims:
+            lines += ["", "### Unsupported Claims", *[f"- {c}" for c in self.unsupported_claims]]
+        if self.reasoning:
+            lines += ["", "### Judge Reasoning", self.reasoning]
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         return f"EvaluationScore(overall={self.overall}/10, grade={self.grade!r})"
 

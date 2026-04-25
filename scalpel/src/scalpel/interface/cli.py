@@ -31,6 +31,15 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
+def _save_report(content: str, output: Optional[Path]) -> None:
+    """Save a markdown report to a file if output path is provided."""
+    if output is None:
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(content, encoding="utf-8")
+    console.print(f"\n[green]✓[/green] Report saved to [cyan]{output}[/cyan]")
+
+
 @app.callback()
 def main(
     version: bool = typer.Option(
@@ -255,36 +264,45 @@ def analyze(
         "--full", "-f",
         help="Run full analysis (slower but comprehensive).",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Analyze a paper with AI-powered critique.
-    
+
     By default, runs a quick assessment. Use --full for comprehensive analysis.
     """
     from scalpel.ingestion import extract_pdf
     from scalpel.analysis import full_analysis, bullshit_score, summarize
-    
+
     console.print(f"\n[bold]🔪 Analyzing paper...[/bold]\n")
-    
+
     try:
         paper = extract_pdf(filepath)
-        
+
         if full:
             results = full_analysis(paper)
-            
+
             console.print("\n")
             results["summary"].display()
             results["methodology"].display()
             results["bullshit_score"].display()
+            _save_report(
+                "\n\n".join(r.to_markdown() for r in results.values()),
+                output,
+            )
         else:
-            # Quick analysis: summary + bullshit score
             summary = summarize(paper, mode="brief")
             bs = bullshit_score(paper)
-            
+
             console.print("\n")
             summary.display()
             bs.display()
-            
+            _save_report(summary.to_markdown() + "\n\n" + bs.to_markdown(), output)
+
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
         raise typer.Exit(1)
@@ -303,21 +321,27 @@ def summarize(
         "--brief", "-b",
         help="Generate a brief summary (faster).",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Generate a summary of a paper.
     """
     from scalpel.ingestion import extract_pdf
     from scalpel.analysis import summarize as do_summarize
-    
+
     try:
         paper = extract_pdf(filepath)
         mode = "brief" if brief else "full"
         result = do_summarize(paper, mode=mode)
-        
+
         console.print("\n")
         result.display()
-        
+        _save_report(result.to_markdown(), output)
+
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
         raise typer.Exit(1)
@@ -331,22 +355,28 @@ def bullshit_score_cmd(
         exists=True,
         readable=True,
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Calculate the Bullshit Score for a paper.
-    
+
     The crown jewel of SCALPEL. Evaluates scientific rigor on a 0-10 scale.
     """
     from scalpel.ingestion import extract_pdf
     from scalpel.analysis import bullshit_score
-    
+
     try:
         paper = extract_pdf(filepath)
         bs = bullshit_score(paper)
-        
+
         console.print("\n")
         bs.display()
-        
+        _save_report(bs.to_markdown(), output)
+
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
         raise typer.Exit(1)
@@ -365,6 +395,11 @@ def critique(
         "--focus", "-f",
         help="Focus area: 'methods', 'statistics', 'claims', or 'full'.",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Generate a detailed critique of a paper.
@@ -372,10 +407,10 @@ def critique(
     from scalpel.ingestion import extract_pdf
     from scalpel.analysis import critique_methodology, critique_statistics, critique_full
     from scalpel.analysis import extract_claims
-    
+
     try:
         paper = extract_pdf(filepath)
-        
+
         if focus == "methods":
             result = critique_methodology(paper)
         elif focus == "statistics":
@@ -384,10 +419,11 @@ def critique(
             result = extract_claims(paper)
         else:
             result = critique_full(paper)
-        
+
         console.print("\n")
         result.display()
-        
+        _save_report(result.to_markdown(), output)
+
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
         raise typer.Exit(1)
@@ -408,6 +444,11 @@ def eval(
         "--results", "-n",
         help="Number of chunks to retrieve.",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Ask a question, generate a RAG response, then score it.
@@ -420,7 +461,6 @@ def eval(
     from scalpel.analysis.prompts import get_template
     from scalpel.evaluation import evaluate as eval_response
 
-    # Retrieve chunks
     console.print(f"\n[dim]Searching for relevant context...[/dim]")
     results = do_search(query, n_results=n)
 
@@ -433,7 +473,6 @@ def eval(
         f"[{r.paper_title}]\n{r.text}" for r in results
     )
 
-    # Generate RAG response
     console.print("[dim]Generating response...[/dim]")
     client = get_client()
     template = get_template("rag_query")
@@ -447,11 +486,15 @@ def eval(
         border_style="cyan",
     ))
 
-    # Evaluate
     console.print()
     score = eval_response(query, chunk_texts, llm_response.content)
     score.display()
     console.print()
+
+    _save_report(
+        f"# Query: {query}\n\n## Response\n\n{llm_response.content}\n\n{score.to_markdown()}",
+        output,
+    )
 
 
 # =============================================================================
@@ -932,6 +975,11 @@ def bear_analyse(
         ...,
         help="Stock ticker symbol to analyse (e.g. AAPL).",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Full investment report: bull case, bear case, key assumptions, and bullshit scores.
@@ -944,6 +992,7 @@ def bear_analyse(
         report = get_analyst().full_report(ticker)
         console.print()
         report.display()
+        _save_report(report.to_markdown(), output)
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -958,6 +1007,11 @@ def bear_bs(
         ...,
         help="Stock ticker symbol to evaluate (e.g. TSLA).",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Bullshit score only — how credible are this company's claims?
@@ -971,6 +1025,7 @@ def bear_bs(
         result = get_analyst().bullshit_score(ticker)
         console.print()
         result.display()
+        _save_report(result.to_markdown(), output)
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -985,6 +1040,11 @@ def bear_cross(
         ...,
         help="Stock ticker symbol to cross-reference (e.g. NVDA).",
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Cross-reference company claims against the scientific paper library.
@@ -998,6 +1058,7 @@ def bear_cross(
         result = get_cross_referencer().cross_reference(ticker)
         console.print()
         result.display()
+        _save_report(result.to_markdown(), output)
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -1010,6 +1071,11 @@ def bear_cross(
 def bear_compare(
     ticker1: str = typer.Argument(..., help="First ticker symbol."),
     ticker2: str = typer.Argument(..., help="Second ticker symbol."),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save report to this file (markdown).",
+    ),
 ):
     """
     Comparative investment analysis of two companies.
@@ -1028,6 +1094,10 @@ def bear_compare(
             ),
             border_style="cyan",
         ))
+        _save_report(
+            f"# Comparison: {ticker1.upper()} vs {ticker2.upper()}\n\n{comparison}",
+            output,
+        )
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)

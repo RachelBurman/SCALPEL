@@ -74,6 +74,30 @@ class CrossReferenceResult:
             border_style="cyan",
         ))
 
+    def to_markdown(self) -> str:
+        """Return the cross-reference result as a markdown string."""
+        market_lines = "\n".join(
+            f"- [{r.ticker}] {r.section} (relevance: {r.score:.3f})"
+            for r in self.market_results[:5]
+        ) or "- None"
+        paper_lines = "\n".join(
+            f"- {r.paper_title}{f' [{r.section}]' if r.section else ''} (relevance: {r.score:.3f})"
+            for r in self.paper_results[:5]
+        ) or "- None"
+        return "\n".join([
+            f"# Cross-Reference Analysis — {self.company_name} ({self.ticker})",
+            "",
+            "## Sources",
+            "### Market Data",
+            market_lines,
+            "",
+            "### Scientific Papers",
+            paper_lines,
+            "",
+            "## Analysis",
+            self.analysis,
+        ])
+
 
 class CrossReferencer:
     """

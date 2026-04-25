@@ -42,6 +42,13 @@ Thumbs.db
 *.chromadb/
 data/lancedb/
 
-# RL checkpoints and cache (large binary files)
+# Checkpoints and cache (large binary files)
 models/rl/*.pt
 models/rl/step_cache.json
+models/retrieval/step_cache.json
+
+# C++ build artifacts
+src/scalpel/cpp/*.obj
+src/scalpel/cpp/*.exp
+src/scalpel/cpp/*.lib
+src/scalpel/cpp/*.pyd

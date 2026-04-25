@@ -507,38 +507,52 @@ def gui():
 
 
 # =============================================================================
-# RL TRAINING COMMAND
+# COLLECT COMMAND
 # =============================================================================
 
-@app.command("train-rl")
-def train_rl(
-    iterations: int = typer.Option(10, "--iterations", "-i", help="Number of collect→update cycles."),
-    rollouts: int = typer.Option(20, "--rollouts", "-n", help="Rollouts collected per iteration."),
+DEFAULT_QUERIES = [
+    "What statistical methods were used to validate the results?",
+    "What are the main limitations acknowledged by the authors?",
+    "How was the sample size determined and is it adequate?",
+    "What is the effect size and is it practically significant?",
+    "Are the conclusions supported by the data presented?",
+    "What potential confounds were not addressed?",
+    "How does this study compare to prior work in the field?",
+    "What are the key assumptions underlying the methodology?",
+]
+
+
+@app.command()
+def collect(
+    steps: int = typer.Option(
+        4, "--steps", "-s",
+        help="Random parameter combinations to try per query.",
+    ),
     queries_file: Optional[Path] = typer.Option(
         None, "--queries", "-q",
         help="Text file with one query per line. Uses built-in defaults if omitted.",
         exists=True, readable=True,
     ),
-    save_dir: Path = typer.Option(Path("models/rl"), "--save-dir", help="Checkpoint directory."),
-    resume: bool = typer.Option(False, "--resume", "-r", help="Resume from latest checkpoint."),
+    cache_path: Path = typer.Option(
+        Path("models/retrieval/step_cache.json"),
+        "--cache", "-c",
+        help="Path to the cache file.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show per-step details."),
 ):
     """
-    Train the PPO retrieval optimisation agent.
+    Collect retrieval parameter data to improve future searches.
 
-    Collects rollouts through the RAG pipeline, scores them with the LLM
-    judge, and trains a policy to pick better retrieval parameters.
+    Tries random retrieval parameter combinations, scores responses with the
+    LLM judge, and caches results. Run repeatedly to build up the similarity
+    index — more data means smarter parameter selection.
+
     Requires papers to be indexed (run scalpel add / add-arxiv first).
     """
-    try:
-        import torch  # noqa: F401
-    except ImportError:
-        console.print("[red]✗ PyTorch not installed.[/red]")
-        console.print("[dim]Install with: pip install torch[/dim]")
-        raise typer.Exit(1)
+    from scalpel.retrieval.cache import RetrievalCache
+    from scalpel.retrieval.collector import RAGCollector
+    from scalpel.retrieval.optimizer import RetrievalOptimizer
 
-    from scalpel.rl.train import train, DEFAULT_QUERIES
-
-    queries = None
     if queries_file:
         queries = [
             line.strip()
@@ -550,17 +564,34 @@ def train_rl(
         queries = DEFAULT_QUERIES
         console.print(f"\n[dim]Using {len(queries)} built-in queries[/dim]")
 
+    cache = RetrievalCache(path=cache_path)
+    collector = RAGCollector(cache=cache, verbose=verbose)
+
+    console.print(
+        f"[bold]Starting collection:[/bold] {len(queries)} queries × {steps} steps  "
+        f"(cache: {len(cache)} entries)\n"
+    )
+
     try:
-        train(
-            queries=queries,
-            n_iterations=iterations,
-            n_rollouts_per_iter=rollouts,
-            save_dir=save_dir,
-            resume=resume,
-        )
+        stats = collector.collect(queries=queries, steps_per_query=steps)
     except Exception as e:
-        console.print(f"\n[red]✗ Training failed:[/red] {e}")
+        console.print(f"\n[red]✗ Collection failed:[/red] {e}")
         raise typer.Exit(1)
+
+    console.print(f"\n[bold green]Collection complete[/bold green]")
+    console.print(f"  Total steps:      {stats.total_steps}")
+    console.print(f"  Cache hits:       {stats.cache_hits}")
+    console.print(f"  New evaluations:  {stats.new_evaluations}")
+    if stats.scores:
+        console.print(f"  Mean score:       {stats.mean_score:.2f} / 10")
+        console.print(f"  Best score:       {stats.best_score:.2f} / 10")
+    if stats.daily_limit_hit:
+        console.print("\n[yellow]Daily API limit reached — run again tomorrow to collect more.[/yellow]")
+
+    # Show index size after rebuild
+    optimizer = RetrievalOptimizer(cache)
+    n = optimizer.build_index()
+    console.print(f"\n[dim]Similarity index: {n} unique queries indexed[/dim]\n")
 
 
 # =============================================================================
@@ -839,6 +870,218 @@ def config():
         title="[bold cyan]⚙️ Configuration[/bold cyan]",
         border_style="cyan",
     ))
+
+
+# =============================================================================
+# BEAR SUB-APP — Bias Evaluation and Analysis of Research
+# =============================================================================
+
+bear_app = typer.Typer(
+    name="bear",
+    help="BEAR - Bias Evaluation and Analysis of Research. AI-powered investment analysis.",
+    add_completion=False,
+    rich_markup_mode="rich",
+)
+app.add_typer(bear_app)
+
+
+@bear_app.command("add")
+def bear_add(
+    ticker: str = typer.Argument(
+        ...,
+        help="Stock ticker symbol to ingest (e.g. AAPL, TSLA).",
+    ),
+):
+    """
+    Ingest a company's market data into the library.
+
+    Fetches financials, earnings, news, key metrics, and analyst recommendations
+    from Yahoo Finance, then chunks and embeds everything into the 'markets' collection.
+    """
+    from scalpel.bear.fetcher import fetch_ticker
+    from scalpel.bear.ingestion import get_market_store
+
+    console.print(f"\n[bold]Adding {ticker.upper()} to market library...[/bold]\n")
+
+    try:
+        data = fetch_ticker(ticker)
+        store = get_market_store()
+        count = store.add_company(data)
+
+        if count > 0:
+            console.print(
+                f"\n[green]✓[/green] Added [bold]{data.company_name}[/bold] "
+                f"({count} chunks indexed)"
+            )
+        else:
+            console.print(
+                f"\n[yellow]{ticker.upper()} already in library.[/yellow] "
+                f"Use [cyan]scalpel bear remove {ticker.upper()}[/cyan] first to re-index."
+            )
+    except ImportError as e:
+        console.print(f"\n[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[red]✗ Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@bear_app.command("analyse")
+def bear_analyse(
+    ticker: str = typer.Argument(
+        ...,
+        help="Stock ticker symbol to analyse (e.g. AAPL).",
+    ),
+):
+    """
+    Full investment report: bull case, bear case, key assumptions, and bullshit scores.
+
+    Requires the company to have been ingested first with [cyan]scalpel bear add[/cyan].
+    """
+    from scalpel.bear.analyst import get_analyst
+
+    try:
+        report = get_analyst().full_report(ticker)
+        console.print()
+        report.display()
+    except ValueError as e:
+        console.print(f"\n[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[red]✗ Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@bear_app.command("bs")
+def bear_bs(
+    ticker: str = typer.Argument(
+        ...,
+        help="Stock ticker symbol to evaluate (e.g. TSLA).",
+    ),
+):
+    """
+    Bullshit score only — how credible are this company's claims?
+
+    Evaluates each major company claim or narrative on a 0-10 scale
+    (0 = iron-clad evidence, 10 = pure spin).
+    """
+    from scalpel.bear.analyst import get_analyst
+
+    try:
+        result = get_analyst().bullshit_score(ticker)
+        console.print()
+        result.display()
+    except ValueError as e:
+        console.print(f"\n[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[red]✗ Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@bear_app.command("cross")
+def bear_cross(
+    ticker: str = typer.Argument(
+        ...,
+        help="Stock ticker symbol to cross-reference (e.g. NVDA).",
+    ),
+):
+    """
+    Cross-reference company claims against the scientific paper library.
+
+    Queries both the 'markets' and 'papers' LanceDB collections simultaneously
+    to identify where research supports, contradicts, or is silent on company claims.
+    """
+    from scalpel.bear.cross_reference import get_cross_referencer
+
+    try:
+        result = get_cross_referencer().cross_reference(ticker)
+        console.print()
+        result.display()
+    except ValueError as e:
+        console.print(f"\n[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[red]✗ Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@bear_app.command("compare")
+def bear_compare(
+    ticker1: str = typer.Argument(..., help="First ticker symbol."),
+    ticker2: str = typer.Argument(..., help="Second ticker symbol."),
+):
+    """
+    Comparative investment analysis of two companies.
+
+    Both companies must be ingested first with [cyan]scalpel bear add[/cyan].
+    """
+    from scalpel.bear.analyst import get_analyst
+
+    try:
+        comparison = get_analyst().compare(ticker1, ticker2)
+        console.print(Panel(
+            Markdown(comparison),
+            title=(
+                f"[bold cyan]Comparison: "
+                f"{ticker1.upper()} vs {ticker2.upper()}[/bold cyan]"
+            ),
+            border_style="cyan",
+        ))
+    except ValueError as e:
+        console.print(f"\n[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[red]✗ Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@bear_app.command("list")
+def bear_list():
+    """
+    List all companies in the market library.
+    """
+    from scalpel.bear.ingestion import get_market_store
+
+    companies = get_market_store().list_companies()
+
+    if not companies:
+        console.print("\n[dim]No companies in market library yet.[/dim]")
+        console.print("[dim]Use [cyan]scalpel bear add <ticker>[/cyan] to add a company.[/dim]\n")
+        return
+
+    table = Table(title=f"📈 Market Library ({len(companies)} companies)")
+    table.add_column("Ticker", style="cyan", width=10)
+    table.add_column("Company", style="white", max_width=40)
+    table.add_column("Chunks", style="green", justify="right")
+    table.add_column("Fetched", style="dim", width=12)
+
+    for co in sorted(companies, key=lambda x: x["ticker"]):
+        fetched = co.get("fetched_at", "")[:10] if co.get("fetched_at") else "N/A"
+        table.add_row(co["ticker"], co["company_name"], str(co["chunk_count"]), fetched)
+
+    console.print()
+    console.print(table)
+    console.print()
+
+
+@bear_app.command("remove")
+def bear_remove(
+    ticker: str = typer.Argument(..., help="Ticker symbol to remove."),
+):
+    """
+    Remove a company from the market library.
+    """
+    from scalpel.bear.ingestion import get_market_store
+
+    if typer.confirm(f"Remove all data for '{ticker.upper()}'?"):
+        count = get_market_store().delete_company(ticker)
+        if count > 0:
+            console.print(f"\n[green]✓[/green] Removed {count} chunks for {ticker.upper()}")
+        else:
+            console.print(f"\n[yellow]No data found for {ticker.upper()}[/yellow]")
+    else:
+        console.print("\n[dim]Cancelled.[/dim]")
 
 
 def run():

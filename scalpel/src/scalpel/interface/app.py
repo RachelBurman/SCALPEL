@@ -1,11 +1,11 @@
 """
-SCALPEL Streamlit UI — Phase 4
+SCALPEL Streamlit UI
 
 Provides a clean web interface for:
   - RAG query with retrieved chunks and similarity scores
   - LLM response display
   - Evaluation scores (groundedness, relevance, confidence calibration)
-  - RL agent training history charts
+  - Collection stats and similarity index explorer
 """
 
 import json
@@ -72,32 +72,26 @@ def get_evaluator():
     return get_evaluator()
 
 
-def load_rl_history(save_dir: Path = Path("models/rl")) -> list[dict]:
-    history_path = save_dir / "training_history.json"
-    if not history_path.exists():
+def load_retrieval_cache(
+    cache_path: Path = Path("models/retrieval/step_cache.json"),
+) -> list[dict]:
+    if not cache_path.exists():
         return []
     try:
-        return json.loads(history_path.read_text())
+        raw = json.loads(cache_path.read_text(encoding="utf-8"))
+        return list(raw.values())
     except Exception:
         return []
 
 
-def load_rl_agent(save_dir: Path = Path("models/rl")):
-    """Load the latest trained RL agent if available."""
-    final = save_dir / "agent_final.pt"
-    checkpoints = sorted(save_dir.glob("agent_iter_*.pt"))
-    target = final if final.exists() else (checkpoints[-1] if checkpoints else None)
-    if target is None:
-        return None
-    try:
-        import torch
-        from scalpel.rl.agent import PPOAgent
-        agent = PPOAgent()
-        agent.load(target)
-        agent.policy.eval()
-        return agent
-    except Exception:
-        return None
+@st.cache_resource(show_spinner="Building similarity index...")
+def get_optimizer(cache_path: str = "models/retrieval/step_cache.json"):
+    from scalpel.retrieval.cache import RetrievalCache
+    from scalpel.retrieval.optimizer import RetrievalOptimizer
+    cache = RetrievalCache(path=Path(cache_path))
+    optimizer = RetrievalOptimizer(cache)
+    optimizer.build_index()
+    return optimizer
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -144,8 +138,12 @@ with st.sidebar:
     st.divider()
 
     n_chunks = st.slider("Chunks to retrieve", 3, 10, 5)
-    use_rl   = st.toggle("Use RL agent for retrieval", value=False,
-                          help="Requires a trained agent in models/rl/")
+    use_optimizer = st.toggle(
+        "Use similarity optimizer",
+        value=False,
+        help="Picks retrieval params based on similar past queries. "
+             "Run `scalpel collect` first to build the index.",
+    )
     st.divider()
 
     # Library stats
@@ -170,7 +168,7 @@ with st.sidebar:
 
 # ── Main tabs ─────────────────────────────────────────────────────────────────
 
-tab_query, tab_rl = st.tabs(["🔍 Query & Evaluate", "🤖 RL Training History"])
+tab_query, tab_rl = st.tabs(["🔍 Query & Evaluate", "📊 Collection Stats"])
 
 
 # ── Query tab ─────────────────────────────────────────────────────────────────
@@ -192,10 +190,13 @@ with tab_query:
             try:
                 store = get_store()
 
-                if use_rl:
-                    agent = load_rl_agent()
-                    if agent is None:
-                        st.warning("No trained RL agent found — using default retrieval.")
+                if use_optimizer:
+                    optimizer = get_optimizer()
+                    if optimizer.index_size == 0:
+                        st.warning(
+                            "Similarity index is empty — using default retrieval. "
+                            "Run `scalpel collect` to build the index."
+                        )
                         results = store.search(query, n_results=n_chunks)
                         params_used = None
                     else:
@@ -204,7 +205,7 @@ with tab_query:
                         from scalpel.config import settings as _s
                         emb = _ollama.embed(model=_s.embedding_model, input=query)
                         state = np.array(emb["embeddings"][0], dtype=np.float32)
-                        params = agent.get_params(state)
+                        params = optimizer.get_params(state)
                         results = store.search(query, n_results=params.n_chunks)
                         if params.similarity_threshold > 0:
                             results = [r for r in results if r.score >= params.similarity_threshold]
@@ -355,114 +356,80 @@ with tab_query:
             st.plotly_chart(fig, use_container_width=True)
 
 
-# ── RL History tab ────────────────────────────────────────────────────────────
+# ── Collection Stats tab ──────────────────────────────────────────────────────
 
 with tab_rl:
-    st.markdown("## RL Agent Training History")
+    st.markdown("## Collection Stats")
+    st.caption(
+        "Run `scalpel collect` to gather (query, params, score) data. "
+        "The more you collect, the smarter the similarity optimizer becomes."
+    )
 
-    history = load_rl_history()
+    entries = load_retrieval_cache()
 
-    if not history:
+    if not entries:
         st.info(
-            "No training history found. Run `scalpel train-rl` to start training "
-            "the retrieval optimisation agent."
+            "No collection data yet. Run `scalpel collect` to start building "
+            "the retrieval parameter index."
         )
     else:
-        iterations = [h["iteration"] for h in history]
+        import pandas as pd
+
+        df = pd.DataFrame(entries)
 
         # ── Summary metrics ───────────────────────────────────────────────────
+        unique_queries = df["query"].nunique() if "query" in df.columns else 0
+        mean_score = df["eval_score"].mean() if "eval_score" in df.columns else 0
+        best_score = df["eval_score"].max() if "eval_score" in df.columns else 0
+
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Iterations completed", len(history))
-        col2.metric("Best mean reward",
-                    f"{max(h['mean_reward'] for h in history):+.3f}")
-        col3.metric("Latest mean eval score",
-                    f"{history[-1]['mean_eval_score']:.2f}/10")
-        if "policy_loss" in history[-1]:
-            col4.metric("Latest policy loss",
-                        f"{history[-1]['policy_loss']:.4f}")
+        col1.metric("Total entries", len(df))
+        col2.metric("Unique queries", unique_queries)
+        col3.metric("Mean eval score", f"{mean_score:.2f}/10")
+        col4.metric("Best eval score", f"{best_score:.2f}/10")
 
         st.divider()
 
-        # ── Reward chart ──────────────────────────────────────────────────────
-        st.markdown("### Mean reward per iteration")
-        fig_reward = go.Figure()
-        fig_reward.add_trace(go.Scatter(
-            x=iterations,
-            y=[h["mean_reward"] for h in history],
-            name="Mean reward",
-            mode="lines+markers",
-            line=dict(color="#7c3aed", width=2),
-            marker=dict(size=8),
-            fill="tozeroy",
-            fillcolor="rgba(124,58,237,0.1)",
-        ))
-        fig_reward.add_hline(y=0, line_dash="dash", line_color="#6b7280",
-                             annotation_text="baseline")
-        fig_reward.update_layout(
-            height=280,
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font_color="#e5e7eb",
-            yaxis=dict(gridcolor="#374151", title="Reward"),
-            xaxis=dict(gridcolor="#374151", title="Iteration", dtick=1),
-        )
-        st.plotly_chart(fig_reward, use_container_width=True)
-
-        # ── Eval score chart ──────────────────────────────────────────────────
-        st.markdown("### Mean evaluation score per iteration")
-        fig_eval = go.Figure()
-        fig_eval.add_trace(go.Scatter(
-            x=iterations,
-            y=[h["mean_eval_score"] for h in history],
-            name="Mean eval score",
-            mode="lines+markers",
-            line=dict(color="#22c55e", width=2),
-            marker=dict(size=8),
-        ))
-        fig_eval.update_layout(
-            height=280,
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font_color="#e5e7eb",
-            yaxis=dict(range=[0, 10], gridcolor="#374151", title="Score / 10"),
-            xaxis=dict(gridcolor="#374151", title="Iteration", dtick=1),
-        )
-        st.plotly_chart(fig_eval, use_container_width=True)
-
-        # ── Loss chart ────────────────────────────────────────────────────────
-        if "policy_loss" in history[0]:
-            st.markdown("### PPO losses")
-            fig_loss = go.Figure()
-            for key, color, name in [
-                ("policy_loss", "#f59e0b", "Policy loss"),
-                ("value_loss",  "#38bdf8", "Value loss"),
-                ("entropy",     "#a78bfa", "Entropy"),
-            ]:
-                if key in history[0]:
-                    fig_loss.add_trace(go.Scatter(
-                        x=iterations,
-                        y=[h.get(key, 0) for h in history],
-                        name=name,
-                        mode="lines+markers",
-                        line=dict(color=color, width=2),
-                        marker=dict(size=6),
-                    ))
-            fig_loss.update_layout(
-                height=280,
+        # ── Score distribution ────────────────────────────────────────────────
+        if "eval_score" in df.columns:
+            st.markdown("### Score distribution")
+            fig_hist = go.Figure(go.Histogram(
+                x=df["eval_score"],
+                nbinsx=20,
+                marker_color="#7c3aed",
+                opacity=0.8,
+            ))
+            fig_hist.update_layout(
+                height=250,
                 margin=dict(l=0, r=0, t=10, b=0),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font_color="#e5e7eb",
-                legend=dict(orientation="h", y=1.1),
-                yaxis=dict(gridcolor="#374151"),
-                xaxis=dict(gridcolor="#374151", title="Iteration", dtick=1),
+                xaxis=dict(title="Eval score (0–10)", gridcolor="#374151"),
+                yaxis=dict(title="Count", gridcolor="#374151"),
             )
-            st.plotly_chart(fig_loss, use_container_width=True)
+            st.plotly_chart(fig_hist, use_container_width=True)
 
-        # ── Raw table ─────────────────────────────────────────────────────────
-        with st.expander("Raw training data"):
-            import pandas as pd
-            df = pd.DataFrame(history)
-            st.dataframe(df, use_container_width=True)
+        # ── Best params per query ─────────────────────────────────────────────
+        if "query" in df.columns and "eval_score" in df.columns:
+            st.markdown("### Best parameters per query")
+            best_rows = (
+                df.sort_values("eval_score", ascending=False)
+                .drop_duplicates(subset=["query"])
+                .reset_index(drop=True)
+            )
+
+            display_cols = [c for c in ["query", "eval_score", "action"] if c in best_rows.columns]
+            if display_cols:
+                best_rows["query_short"] = best_rows["query"].str[:60]
+                st.dataframe(
+                    best_rows[["query_short", "eval_score", "action"]].rename(
+                        columns={"query_short": "query", "eval_score": "score"}
+                    ),
+                    use_container_width=True,
+                )
+
+        # ── Raw data ──────────────────────────────────────────────────────────
+        with st.expander("Raw cache entries"):
+            show_cols = [c for c in ["query", "action", "eval_score", "reward"] if c in df.columns]
+            st.dataframe(df[show_cols], use_container_width=True)

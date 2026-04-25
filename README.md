@@ -2,7 +2,7 @@
 
 **Scientific Critique & Analysis Pipeline for Evidence Literature**
 
-A personal AI research assistant that ingests, critiques, and cross-references academic papers. Built to cut through the noise and find the signal — and to score papers on how much bullshit they contain.
+A personal AI research assistant that ingests, critiques, and cross-references academic papers — and now investment research too. Built to cut through the noise and find the signal, and to score both papers and company claims on how much bullshit they contain.
 
 ---
 
@@ -13,7 +13,9 @@ A personal AI research assistant that ingests, critiques, and cross-references a
 - 🧠 **AI Critique** — Methodology, statistics, claims, limitations
 - 💩 **Bullshit Score** — Scientific rigour scored 0–10 with red flags
 - 🔬 **RAG Evaluation** — LLM-as-judge scoring of groundedness, relevance, and confidence calibration
-- 🤖 **RL Retrieval Agent** — PPO agent that learns optimal retrieval parameters from evaluation feedback
+- 📈 **BEAR Module** — Bias Evaluation and Analysis of Research: investment analysis with bull/bear cases, per-claim BS scores, and cross-referencing of company claims against your paper library
+- ⚡ **C++ Chunker** — pybind11 extension for fast semantic boundary detection
+- 🖥️ **Web UI** — Streamlit interface for RAG querying, evaluation scores, and analytics
 
 ---
 
@@ -24,21 +26,25 @@ A personal AI research assistant that ingests, critiques, and cross-references a
 | LLM (cloud) | OpenRouter — any free or paid model |
 | LLM (local) | Ollama |
 | Embeddings | `nomic-embed-text` via Ollama |
-| Vector DB | LanceDB |
+| Vector DB | LanceDB (`papers` + `markets` collections) |
 | PDF Processing | PyMuPDF |
-| RL Training | PyTorch (PPO from scratch) |
+| Market Data | yfinance (Yahoo Finance) |
 | CLI | Typer + Rich |
+| Web UI | Streamlit + Plotly |
 
 ---
 
 ## Setup
 
 ```bash
-# Install dependencies
+# Install core dependencies
 poetry install
 
-# For RL training
-poetry install --extras rl
+# For BEAR (investment analysis)
+pip install scalpel[bear]
+
+# For the Streamlit web UI
+pip install scalpel[ui]
 
 # Configure provider and model interactively
 scalpel setup
@@ -52,12 +58,14 @@ ollama pull nomic-embed-text
 ```
 LLM_PROVIDER=openrouter          # or "ollama"
 OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_MODEL=google/gemma-2-9b-it:free
 ```
 
 ---
 
 ## Usage
+
+### Papers
 
 ```bash
 # Add papers
@@ -76,16 +84,40 @@ scalpel eval "How does self-attention work?"
 
 # Library management
 scalpel list
+scalpel remove "paper title"
 scalpel stats
 scalpel config
+scalpel model    # Switch LLM without re-running setup
+```
 
-# Switch model without re-running setup
-scalpel model
+### BEAR — Investment Analysis
 
-# Train the RL retrieval agent
-scalpel train-rl
-scalpel train-rl --resume              # Continue from last checkpoint
-scalpel train-rl --iterations 20 --rollouts 30
+```bash
+# Ingest a company (fetches from Yahoo Finance)
+scalpel bear add AAPL
+scalpel bear add TSLA
+
+# Full investment report: bull case, bear case, key assumptions, per-claim BS scores
+scalpel bear analyse NVDA
+
+# Bullshit score only — how credible are the company's claims?
+scalpel bear bs TSLA
+
+# Cross-reference company claims against your scientific paper library
+scalpel bear cross MRNA
+
+# Compare two companies head-to-head
+scalpel bear compare AAPL MSFT
+
+# Library management
+scalpel bear list
+scalpel bear remove TSLA
+```
+
+### Web UI
+
+```bash
+scalpel ui    # Opens Streamlit interface in browser
 ```
 
 ---
@@ -96,30 +128,35 @@ scalpel train-rl --iterations 20 --rollouts 30
 scalpel/
 ├── src/scalpel/
 │   ├── ingestion/       # PDF extraction, chunking, arXiv fetcher
-│   ├── embeddings/      # LanceDB vector store + Ollama embeddings
+│   ├── embeddings/      # LanceDB 'papers' vector store + Ollama embeddings
 │   ├── analysis/        # LLM client, critique engine, prompts
 │   ├── evaluation/      # LLM-as-judge: groundedness, relevance, confidence
-│   ├── rl/              # PPO retrieval agent (PyTorch)
-│   │   ├── environment.py  # RAG pipeline as RL environment + result cache
-│   │   ├── policy.py       # Actor-Critic network
-│   │   ├── agent.py        # PPO algorithm from scratch
-│   │   └── train.py        # Training loop with checkpoint resume
-│   └── interface/       # CLI (Typer) + Textual TUI
+│   ├── retrieval/       # Retrieval parameter optimisation + data collection
+│   ├── bear/            # BEAR: market data fetcher, 'markets' vector store,
+│   │   ├── fetcher.py      #   yfinance ingestion (financials, earnings, news)
+│   │   ├── ingestion.py    #   LanceDB 'markets' collection
+│   │   ├── analyst.py      #   LLM investment reports + per-claim BS scoring
+│   │   └── cross_reference.py  # Cross-references papers ↔ market claims
+│   ├── cpp/             # pybind11 C++ extension (fast chunker)
+│   └── interface/       # CLI (Typer + Rich) + Streamlit web UI
 ├── data/papers/         # Your paper library (gitignored)
-├── models/rl/           # RL checkpoints (gitignored)
+├── data/lancedb/        # Vector database (gitignored)
 └── pyproject.toml
 ```
 
 ---
 
-## Phase Status
+## Bullshit Scoring
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | LLM Evaluation Framework (groundedness, relevance, confidence) | ✅ Complete |
-| 2 | PPO Retrieval Optimisation (PyTorch, from scratch) | ✅ Complete |
-| 3 | C++ acceleration (pybind11 chunker) | 🔜 Next |
-| 4 | Streamlit interface | 🔜 Planned |
+Both the paper analyser and BEAR use a 0–10 bullshit scale:
+
+| Score | Rating | Meaning |
+|-------|--------|---------|
+| 0–2 | Highly Credible | Strong evidence, conservative claims |
+| 3–4 | Mostly Credible | Minor gaps, well-supported overall |
+| 5–6 | Mixed Signals | Some claims outrun the evidence |
+| 7–8 | Heavy Spin | Corporate/academic narrative dominates |
+| 9–10 | Pure Narrative | Little to no evidential grounding |
 
 ---
 

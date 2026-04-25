@@ -39,8 +39,8 @@ class Settings(BaseSettings):
     lancedb_path: Path = Path("data/lancedb")
 
     # Analysis Settings
-    chunk_size: int = 2000
-    chunk_overlap: int = 200
+    chunk_size: int = 1200
+    chunk_overlap: int = 120
 
     # Embedding Configuration (always uses Ollama for local embeddings)
     embedding_model: str = "nomic-embed-text"

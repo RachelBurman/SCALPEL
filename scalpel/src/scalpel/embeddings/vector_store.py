@@ -85,14 +85,15 @@ class VectorStore:
         response = ollama.embed(
             model=self.embedding_model,
             input=text,
+            truncate=True,
         )
         return response["embeddings"][0]
-    
+
     def _embed_batch(self, texts: list[str], show_progress: bool = True) -> list[list[float]]:
         """Generate embeddings for multiple texts."""
         embeddings = []
         batch_size = settings.embedding_batch_size
-        
+
         if show_progress:
             with Progress(
                 SpinnerColumn(),
@@ -102,12 +103,13 @@ class VectorStore:
                 console=console,
             ) as progress:
                 task = progress.add_task("Embedding", total=len(texts))
-                
+
                 for i in range(0, len(texts), batch_size):
                     batch = texts[i:i + batch_size]
                     response = ollama.embed(
                         model=self.embedding_model,
                         input=batch,
+                        truncate=True,
                     )
                     embeddings.extend(response["embeddings"])
                     progress.update(task, advance=len(batch))
@@ -117,6 +119,7 @@ class VectorStore:
                 response = ollama.embed(
                     model=self.embedding_model,
                     input=batch,
+                    truncate=True,
                 )
                 embeddings.extend(response["embeddings"])
         

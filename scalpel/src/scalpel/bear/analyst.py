@@ -330,6 +330,25 @@ def _parse_bullet_section(text: str, header: str) -> list[str]:
     return items
 
 
+_TEMPLATE_PHRASES = {
+    "a major company claim or narrative",
+    "exact claim",
+    "the claim",
+    "another major claim",
+    "why this score",
+    "why this score — be specific",
+    "be specific",
+}
+
+
+def _is_placeholder(text: str) -> bool:
+    """Return True if text looks like an unfilled prompt template."""
+    stripped = text.strip().strip("[]").lower()
+    return stripped in _TEMPLATE_PHRASES or (
+        text.strip().startswith("[") and text.strip().endswith("]") and len(text.strip()) < 80
+    )
+
+
 def _parse_claims(text: str) -> list[Claim]:
     """Parse CLAIM / BS SCORE / REASONING triplets from LLM output."""
     claims = []
@@ -341,6 +360,9 @@ def _parse_claims(text: str) -> list[Claim]:
             continue
         claim_text = claim_match.group(1).strip()
 
+        if _is_placeholder(claim_text):
+            continue
+
         score_match = re.search(r"(?i)BS SCORE:\s*(\d+(?:\.\d+)?)", part)
         score = float(score_match.group(1)) if score_match else 5.0
         score = min(10.0, max(0.0, score))
@@ -349,6 +371,9 @@ def _parse_claims(text: str) -> list[Claim]:
             r"(?i)REASONING:\s*(.+?)(?=\nCLAIM:|\nOVERALL|$)", part, re.DOTALL
         )
         reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+
+        if _is_placeholder(reasoning):
+            reasoning = ""
 
         claims.append(Claim(text=claim_text, bs_score=score, reasoning=reasoning))
     return claims

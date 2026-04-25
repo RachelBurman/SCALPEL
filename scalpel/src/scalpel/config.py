@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # Paths
     papers_dir: Path = Path("data/papers")
     lancedb_path: Path = Path("data/lancedb")
+    reports_dir: Path = Path("data/reports")
 
     # Analysis Settings
     chunk_size: int = 1200
@@ -61,6 +62,7 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         self.papers_dir.mkdir(parents=True, exist_ok=True)
         self.lancedb_path.mkdir(parents=True, exist_ok=True)
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
 
 
 # Global settings instance

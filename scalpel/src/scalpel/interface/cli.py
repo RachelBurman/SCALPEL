@@ -31,10 +31,15 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-def _save_report(content: str, output: Optional[Path]) -> None:
-    """Save a markdown report to a file if output path is provided."""
+def _save_report(content: str, output: Optional[Path], default_name: str) -> None:
+    """Save a markdown report. Uses output path if given, otherwise auto-saves to reports_dir."""
+    from datetime import datetime
+    from scalpel.config import settings
+
     if output is None:
-        return
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        output = settings.reports_dir / f"{default_name}_{timestamp}.md"
+
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(content, encoding="utf-8")
     console.print(f"\n[green]✓[/green] Report saved to [cyan]{output}[/cyan]")
@@ -293,6 +298,7 @@ def analyze(
             _save_report(
                 "\n\n".join(r.to_markdown() for r in results.values()),
                 output,
+                f"analyse_{filepath.stem}",
             )
         else:
             summary = summarize(paper, mode="brief")
@@ -301,7 +307,7 @@ def analyze(
             console.print("\n")
             summary.display()
             bs.display()
-            _save_report(summary.to_markdown() + "\n\n" + bs.to_markdown(), output)
+            _save_report(summary.to_markdown() + "\n\n" + bs.to_markdown(), output, f"analyse_{filepath.stem}")
 
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
@@ -340,7 +346,7 @@ def summarize(
 
         console.print("\n")
         result.display()
-        _save_report(result.to_markdown(), output)
+        _save_report(result.to_markdown(), output, f"summarize_{filepath.stem}")
 
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
@@ -375,7 +381,7 @@ def bullshit_score_cmd(
 
         console.print("\n")
         bs.display()
-        _save_report(bs.to_markdown(), output)
+        _save_report(bs.to_markdown(), output, f"bs_{filepath.stem}")
 
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
@@ -422,7 +428,7 @@ def critique(
 
         console.print("\n")
         result.display()
-        _save_report(result.to_markdown(), output)
+        _save_report(result.to_markdown(), output, f"critique_{focus}_{filepath.stem}")
 
     except Exception as e:
         console.print(f"\n[red]✗ Error:[/red] {e}")
@@ -494,6 +500,7 @@ def eval(
     _save_report(
         f"# Query: {query}\n\n## Response\n\n{llm_response.content}\n\n{score.to_markdown()}",
         output,
+        "eval",
     )
 
 
@@ -992,7 +999,7 @@ def bear_analyse(
         report = get_analyst().full_report(ticker)
         console.print()
         report.display()
-        _save_report(report.to_markdown(), output)
+        _save_report(report.to_markdown(), output, f"bear_analyse_{ticker.upper()}")
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -1025,7 +1032,7 @@ def bear_bs(
         result = get_analyst().bullshit_score(ticker)
         console.print()
         result.display()
-        _save_report(result.to_markdown(), output)
+        _save_report(result.to_markdown(), output, f"bear_bs_{ticker.upper()}")
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -1058,7 +1065,7 @@ def bear_cross(
         result = get_cross_referencer().cross_reference(ticker)
         console.print()
         result.display()
-        _save_report(result.to_markdown(), output)
+        _save_report(result.to_markdown(), output, f"bear_cross_{ticker.upper()}")
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -1097,6 +1104,7 @@ def bear_compare(
         _save_report(
             f"# Comparison: {ticker1.upper()} vs {ticker2.upper()}\n\n{comparison}",
             output,
+            f"bear_compare_{ticker1.upper()}_vs_{ticker2.upper()}",
         )
     except ValueError as e:
         console.print(f"\n[red]✗[/red] {e}")

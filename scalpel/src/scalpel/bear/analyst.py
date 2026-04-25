@@ -219,16 +219,18 @@ class InvestmentReport:
 
     def to_markdown(self) -> str:
         """Return the investment report as a markdown string."""
+        bull_items = [f"- {p}" for p in self.bull_case] or ["- No bull case identified."]
+        bear_items = [f"- {p}" for p in self.bear_case] or ["- No bear case identified."]
         lines = [
             f"# BEAR Investment Report — {self.company_name} ({self.ticker})",
             "",
             f"**Overall BS Score: {self.overall_bs_score:.1f}/10 — {self.bs_rating}**",
             "",
             "## Bull Case",
-            *[f"- {p}" for p in self.bull_case] or ["- No bull case identified."],
+            *bull_items,
             "",
             "## Bear Case",
-            *[f"- {p}" for p in self.bear_case] or ["- No bear case identified."],
+            *bear_items,
         ]
         if self.key_assumptions:
             lines += ["", "## Key Assumptions", *[f"- {a}" for a in self.key_assumptions]]

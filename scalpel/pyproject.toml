@@ -35,6 +35,12 @@ ui = [
 bear = [
     "yfinance>=0.2.0",
 ]
+agent = [
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-ollama>=0.2.0",
+    "langchain-openai>=0.2.0",
+]
 
 [project.scripts]
 scalpel = "scalpel.interface.cli:run"

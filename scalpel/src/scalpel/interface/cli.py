@@ -505,6 +505,101 @@ def eval(
 
 
 # =============================================================================
+# AGENT COMMAND
+# =============================================================================
+
+@app.command()
+def agent(
+    goal: str = typer.Argument(
+        ...,
+        help="Research goal or question for the agent to investigate autonomously.",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Save the agent report to this file (markdown).",
+    ),
+):
+    """
+    Run the SCALPEL autonomous research agent.
+
+    The agent decides which papers to retrieve, which analyses to run,
+    and how to sequence its reasoning — no per-step instruction needed.
+
+    Requires a tool-calling capable model (Qwen 2.5 7B+ or any OpenRouter model).
+
+    Example:
+        scalpel agent "critique the statistical methods across all indexed papers"
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+    from scalpel.agent.runner import stream_run
+
+    console.print(f"\n[bold cyan]🔪 SCALPEL Agent[/bold cyan]\n")
+    console.print(Panel(
+        f"[bold]Goal:[/bold] {goal}",
+        border_style="dim",
+    ))
+    console.print()
+
+    report = ""
+    step = 0
+
+    try:
+        for event in stream_run(goal):
+
+            if "planner" in event:
+                step += 1
+                msgs = event["planner"].get("messages", [])
+                if msgs:
+                    last = msgs[-1]
+                    tool_calls = getattr(last, "tool_calls", None)
+                    if tool_calls:
+                        for tc in tool_calls:
+                            args = tc.get("args", {})
+                            # Show first arg value as a short preview
+                            preview = next(iter(args.values()), "") if args else ""
+                            if isinstance(preview, str) and len(preview) > 50:
+                                preview = preview[:50] + "..."
+                            preview_str = f"({preview!r})" if preview else "()"
+                            console.print(
+                                f"[dim]Step {step}[/dim] [cyan]→ {tc['name']}{preview_str}[/cyan]"
+                            )
+                    else:
+                        console.print(f"[dim]Step {step}[/dim] [green]Writing report...[/green]")
+
+            elif "tools" in event:
+                msgs = event["tools"].get("messages", [])
+                for msg in msgs:
+                    if isinstance(msg, ToolMessage):
+                        first_line = msg.content.split("\n")[0][:90]
+                        console.print(f"[dim]  ↳ {first_line}[/dim]")
+
+            elif "synthesise" in event:
+                report = event["synthesise"].get("report", "")
+
+    except Exception as e:
+        console.print(f"\n[red]✗ Agent error:[/red] {e}")
+        console.print(
+            "[dim]Check that your model supports tool calling. "
+            "Qwen 2.5 7B+ or any OpenRouter model recommended.[/dim]"
+        )
+        raise typer.Exit(1)
+
+    if not report:
+        console.print("\n[yellow]Agent finished but produced no report.[/yellow]")
+        raise typer.Exit(1)
+
+    console.print()
+    console.print(Panel(
+        Markdown(report),
+        title="[bold]🔪 Agent Report[/bold]",
+        border_style="cyan",
+    ))
+
+    _save_report(report, output, "agent")
+
+
+# =============================================================================
 # STREAMLIT UI COMMAND
 # =============================================================================
 
